@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Creates a Data Exchange pipeline, which performs a full load of the data from
+  subscribed dataset, and performs incremental loads based on updated revisions
+  of the dataset.
+Metadata:
+  Owner: ashrith_reddy_mekala@freddiemac.com
+Parameters:
+  DxDataSetId:
+    AllowedPattern: ^[a-zA-Z0-9]*$
+    ConstraintDescription: Malformed DataSet Id.
+    Description: Entitled Dataset Id for which the consumption pipeline has to be setup.
+    Type: String
+  ConsumptionType:
+    AllowedValues:
+      - FULL_LOAD
+      - INCREMENTAL
+    Description: >-
+      Type of the consumption pipeline to setup, FULL_LOAD will perform one-time
+      load, where as  INCREMENTAL will perform one-time load and setup a
+      monitoring pipeline which will incrementally load data revisions as they
+      are published.
+    Type: String
+    Default: INCREMENTAL
+  S3BucketName:
+    Type: String
+    Description: Bucket used to publish the data to.
+Resources:
+  # TODO: how to trigger DX jobs and monitor till the job gets completed? - probably use step functions?
+  # https://hands-on.cloud/aws-step-functions-how-to-manage-long-running-tasks/
+
+  LambdaFunction:
+    # TODO:
+
+  DxEventNotification:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Monitors entitled dataset for new revisions published
+      EventPattern:
+        source:
+          - aws.dataexchange
+        detail-type:
+          - Revision Published To Data Set
+        resources:
+          - !Ref DxDataSetId
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - "LambdaFunction"
+              - "Arn"
+          Id: "TargetFunctionV1"
+
+  EventsPermissionToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "LambdaFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+      Fn::GetAtt:
+        - "DxEventNotification"
+        - "Arn"

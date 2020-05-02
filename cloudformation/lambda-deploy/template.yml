@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy Lambda.
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the bucket which has the lambda zip file
+  S3Key:
+    Type: String
+    Description: S3 Path of the lambda zip file
+Resources:
+  # Permissions required by the function being deployed to access
+  # AWS resources/services.
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref BucketName
+        S3Key: !Ref S3Key
+      Runtime: python3.7
+      Description: Invoke a Sample function.
+      MemorySize: 128
+      Timeout: 10
