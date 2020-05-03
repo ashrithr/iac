@@ -25,12 +25,156 @@ Parameters:
   S3BucketName:
     Type: String
     Description: Bucket used to publish the data to.
-Resources:
-  # TODO: how to trigger DX jobs and monitor till the job gets completed? - probably use step functions?
-  # https://hands-on.cloud/aws-step-functions-how-to-manage-long-running-tasks/
+  S3CodeBucketName:
+    Type: String
+    Description: Bucket where Lambda zip files are hosted.
 
-  LambdaFunction:
-    # TODO:
+Resources:
+  LambdaIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+              - Effect: Allow
+                Action:
+                  - dataexchange:GetDataSet
+                  - dataexchange:ListDataSet
+                  - dataexchange:GetRevision
+                  - dataexchange:ListDataSetRevisions
+                  - dataexchange:ListRevisionAssets
+                  - dataexchange:CreateJob
+                  - dataexchange:GetJob
+                  - dataexchange:StartJob
+                  - dataexchange:CancelJob
+                  - dataexchange:ListJob
+                  - dataexchange:TagResource
+                  - dataexchange:ListTagsForResource
+                  - dataexchange:GetAsset
+                Resource:
+                  - !Sub arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}*
+                  - !Sub arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:jobs/*
+
+  ExportDataSetLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Exports specified dataset latest revision to S3 bucket.
+      Handler: index.handler
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: Python3.7
+      MemorySize: 128
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref S3CodeBucketName
+        S3Key: export_dataset.zip
+
+  MonitorExportJob:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Monitors the status of an Export Job.
+      Handler: index.handler
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: Python3.7
+      MemorySize: 128
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref S3CodeBucketName
+        S3Key: monitor_export.zip
+
+  StateMachineIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString: !Sub
+        - |-
+          {
+            "Comment": "State machine to export data from subscribed data-exchange entitled data-set",
+            "StartAt": "Export DataSet",
+            "States": {
+              "Export DataSet": {
+                "Type": "Task",
+                "Resource": "${export_dataset_lambda_arn}",
+                "Next": "Wait 1 Minute"
+              },
+              "Wait 1 Minute": {
+                "Type": "Wait",
+                "Seconds": 60,
+                "Next": "Get Export Status"
+              },
+              "Get Export Status": {
+                "Type": "Task",
+                "Resource": "${monitor_export_lambda_arn}",
+                "Next": "Export Complete?"
+              },
+              "Export Complete?": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.ExportJob.Status",
+                    "StringEquals": "available",
+                    "Next": "Done"
+                  },
+                  {
+                    "Variable": "$.ExportJob.Status",
+                    "StringEquals": "failed",
+                    "Next": "Failed"
+                  },
+                ],
+                "Default": "Wait 1 Minute"
+              },
+              "Done": {
+                  "Type": "Pass",
+                  "End": true
+              },
+              "Failed": {
+                  "Type": "Pass",
+                  "End": true
+              }
+            }
+          }
+        - export_dataset_lambda_arn: !GetAtt [ExportDataSetLambda, Arn]
+          monitor_export_lambda_arn: !GetAtt [MonitorExportJob, Arn]
+      RoleArn: !GetAtt [StateMachineIamRole, Arn]
 
   DxEventNotification:
     Type: AWS::Events::Rule
@@ -45,20 +189,44 @@ Resources:
           - !Ref DxDataSetId
       State: ENABLED
       Targets:
-        - Arn:
-            Fn::GetAtt:
-              - "LambdaFunction"
-              - "Arn"
-          Id: "TargetFunctionV1"
+        - Arn: !GetAtt StateMachine.Arn
+          Id: "StateMachineV1"
+          RoleArn: !GetAtt EventsIamRole.Arn
 
-  EventsPermissionToInvokeLambda:
-    Type: AWS::Lambda::Permission
+  EventsIamRole:
+    Type: AWS::IAM::Role
     Properties:
-      FunctionName:
-        Ref: "LambdaFunction"
-      Action: "lambda:InvokeFunction"
-      Principal: "events.amazonaws.com"
-      SourceArn:
-      Fn::GetAtt:
-        - "DxEventNotification"
-        - "Arn"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: EventsStatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource:
+                  !Join [
+                    "",
+                    [
+                      "arn:aws:states:",
+                      !Ref "AWS::Region",
+                      ":",
+                      !Ref "AWS::AccountId",
+                      ":",
+                      "stateMachine:",
+                      !GetAtt StateMachine.Arn,
+                    ],
+                  ]
+
+Outputs:
+  # TODO:
