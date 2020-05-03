@@ -135,6 +135,12 @@ Resources:
                 "Type": "Task",
                 "Resource": "${export_dataset_lambda_arn}",
                 "Next": "Wait 1 Minute"
+                "Parameters": {
+                  "Payload": {
+                    "dataset_id": "${dataset_id}",
+                    "bucket_name": "${bucket_name}"
+                  }
+                }
               },
               "Wait 1 Minute": {
                 "Type": "Wait",
@@ -174,6 +180,8 @@ Resources:
           }
         - export_dataset_lambda_arn: !GetAtt [ExportDataSetLambda, Arn]
           monitor_export_lambda_arn: !GetAtt [MonitorExportJob, Arn]
+          dataset_id: !Ref DxDataSetId
+          bucket_name: !Ref S3BucketName
       RoleArn: !GetAtt [StateMachineIamRole, Arn]
 
   DxEventNotification:
