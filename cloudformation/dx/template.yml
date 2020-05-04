@@ -68,8 +68,24 @@ Resources:
                   - dataexchange:ListTagsForResource
                   - dataexchange:GetAsset
                 Resource:
-                  - !Sub arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}*
+                  - !Sub
+                    - arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}*
+                    - { DxDataSetId: !Ref DxDataSetId }
                   - !Sub arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:jobs/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - arn:aws:s3:::*aws-data-exchange*
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - arn:aws:s3:::*aws-data-exchange*
+                  - !Sub
+                    - arn:aws:s3:::${S3BucketName}/*
+                    - { S3BucketName: !Ref S3BucketName }
 
   ExportDataSetLambda:
     Type: AWS::Lambda::Function
@@ -132,11 +148,12 @@ Resources:
               "Export DataSet": {
                 "Type": "Task",
                 "Resource": "${export_dataset_lambda_arn}",
-                "Next": "Wait 1 Minute"
+                "Next": "Wait 1 Minute",
                 "Parameters": {
                   "Payload": {
                     "dataset_id": "${dataset_id}",
-                    "bucket_name": "${bucket_name}"
+                    "bucket_name": "${bucket_name}",
+                    "prefix": "${prefix}"
                   }
                 }
               },
@@ -148,19 +165,24 @@ Resources:
               "Get Export Status": {
                 "Type": "Task",
                 "Resource": "${monitor_export_lambda_arn}",
-                "Next": "Export Complete?"
+                "Next": "Export Complete?",
+                "Parameters": {
+                  "Payload": {
+                    "job_id": "$.job_id"
+                  }
+                }
               },
               "Export Complete?": {
                 "Type": "Choice",
                 "Choices": [
                   {
-                    "Variable": "$.ExportJob.Status",
-                    "StringEquals": "available",
+                    "Variable": "$.ExportJob.State",
+                    "StringEquals": "COMPLETED",
                     "Next": "Done"
                   },
                   {
-                    "Variable": "$.ExportJob.Status",
-                    "StringEquals": "failed",
+                    "Variable": "$.ExportJob.State",
+                    "StringEquals": "ERROR",
                     "Next": "Failed"
                   },
                 ],
@@ -180,6 +202,7 @@ Resources:
           monitor_export_lambda_arn: !GetAtt [MonitorExportJob, Arn]
           dataset_id: !Ref DxDataSetId
           bucket_name: !Ref S3BucketName
+          prefix: !Ref KeyPrefix
       RoleArn: !GetAtt [StateMachineIamRole, Arn]
 
   DxEventNotification:
@@ -220,19 +243,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:StartExecution
-                Resource:
-                  !Join [
-                    "",
-                    [
-                      "arn:aws:states:",
-                      !Ref "AWS::Region",
-                      ":",
-                      !Ref "AWS::AccountId",
-                      ":",
-                      "stateMachine:",
-                      !GetAtt StateMachine.Arn,
-                    ],
-                  ]
+                Resource: !Sub
+                  - "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StateMachineArn}"
+                  - { StateMachineArn: !GetAtt "StateMachine.Arn" }
 
 Outputs:
   # TODO:

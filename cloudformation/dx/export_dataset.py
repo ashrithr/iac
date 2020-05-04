@@ -1,4 +1,3 @@
-import os
 import boto3
 import logging
 import time
@@ -6,18 +5,18 @@ import time
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-runtime_region = os.environ['AWS_REGION']
-dx = boto3.client('dataexchange', region=runtime_region)
+dx = boto3.client('dataexchange')
 s3 = boto3.client('s3')
 
 
 def handler(event, context):
     dataset_id = event['dataset_id']
     bucket = event['bucket_name']
+    prefix = event['prefix']
 
     dataset_revision = get_lastest_revision(dataset_id)
     dataset_assets = get_all_assets(dataset_id, dataset_revision.get('Id'))
-    job_id = export_assets(dataset_assets, bucket)
+    job_id = export_assets(dataset_assets, bucket, prefix)
 
     return {
         'message': 'Successfully executed exported job',
@@ -82,14 +81,14 @@ def get_all_assets(data_set_id, revision_id):
     return assets
 
 
-def export_assets(assets, bucket):
+def export_assets(assets, bucket, prefix):
     asset_destinations = []
 
     for asset in assets:
         asset_destinations.append({
             "AssetId": asset.get('Id'),
             "Bucket": bucket,
-            "Key": asset.get('Name')
+            "Key": prefix + '/' + asset.get('Name')
         })
 
     job = dx.create_job(Type='EXPORT_ASSETS_TO_S3', Details={
