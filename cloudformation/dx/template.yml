@@ -170,7 +170,7 @@ Resources:
                 Resource:
                   - !GetAtt ExportDataSetLambda.Arn
                   - !GetAtt MonitorExportJob.Arn
-  # TODO: Add notification on failure
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -255,7 +255,7 @@ Resources:
           - !Ref DxDataSetId
       State: ENABLED
       Targets:
-        - Arn: !GetAtt StateMachine.Arn
+        - Arn: !Ref StateMachine
           Id: "StateMachineV1"
           RoleArn: !GetAtt EventsIamRole.Arn
 
@@ -281,9 +281,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:StartExecution
-                Resource: !Sub
-                  - "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StateMachineArn}"
-                  - { StateMachineArn: !GetAtt "StateMachine.Arn" }
+                Resource: !Ref StateMachine
 
   LambdaCustomResourceIamRole:
     Type: AWS::IAM::Role
@@ -317,9 +315,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:StartExecution
-                Resource: !Sub
-                  - "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StateMachineArn}"
-                  - { StateMachineArn: !GetAtt "StateMachine.Arn" }
+                Resource: !Ref StateMachine
 
   ExecuteStateMachineLambda:
     Type: AWS::Lambda::Function
@@ -340,7 +336,7 @@ Resources:
     Condition: IsFullLoad
     Properties:
       ServiceToken: !GetAtt ExecuteStateMachineLambda.Arn
-      SF_ARN: !GetAtt StateMachine.Arn
+      SF_ARN: !Ref StateMachine
 
 Outputs:
   ExportedDataSetId:

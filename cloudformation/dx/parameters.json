@@ -1,18 +1,18 @@
 [
     {
         "ParameterKey": "DxDataSetId",
-        "ParameterValue": "REPLACE_DATASET_ID"
+        "ParameterValue": "aae4c2cd145a48454f9369d4a4db5c66"
     },
     {
         "ParameterKey": "ConsumptionType",
-        "ParameterValue": "FULL"
+        "ParameterValue": "INCREMENTAL"
     },
     {
         "ParameterKey": "S3BucketName",
-        "ParameterValue": "REPLACE_BUCKET_NAME"
+        "ParameterValue": "cw-us-east-1-167270772459-ashrith"
     },
     {
         "ParameterKey": "S3CodeBucketName",
-        "ParameterValue": "REPLACE_BUCKET_NAME"
+        "ParameterValue": "cw-us-east-1-167270772459-ashrith"
     }
 ]

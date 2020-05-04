@@ -101,15 +101,4 @@ def export_assets(assets, bucket, prefix):
     job_id = job.get('Id')
     dx.start_job(JobId=job_id)
 
-    # while True:
-    #     job = dx.get_job(JobId=job_id)
-
-    #     if job.get('State') == 'COMPLETED':
-    #         break
-    #     elif job.get('State') == 'ERROR':
-    #         raise Exception("Job {} failed to complete - {}".format(
-    #             job_id, job.get('Errors')[0].get('Message'))
-    #         )
-
-    #     time.sleep(1)
     return job_id
