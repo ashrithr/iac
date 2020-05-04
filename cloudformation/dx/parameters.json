@@ -1,0 +1,18 @@
+[
+    {
+        "ParameterKey": "DxDataSetId",
+        "ParameterValue": "REPLACE_DATASET_ID"
+    },
+    {
+        "ParameterKey": "ConsumptionType",
+        "ParameterValue": "FULL"
+    },
+    {
+        "ParameterKey": "S3BucketName",
+        "ParameterValue": "REPLACE_BUCKET_NAME"
+    },
+    {
+        "ParameterKey": "S3CodeBucketName",
+        "ParameterValue": "REPLACE_BUCKET_NAME"
+    }
+]

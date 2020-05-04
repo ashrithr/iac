@@ -11,10 +11,10 @@ Parameters:
     Type: String
   ConsumptionType:
     AllowedValues:
-      - FULL_LOAD
+      - FULL
       - INCREMENTAL
     Description: >-
-      Type of the consumption pipeline to setup, FULL_LOAD will perform one-time
+      Type of the consumption pipeline to setup, FULL will perform one-time
       load, where as  INCREMENTAL will perform one-time load and setup a
       monitoring pipeline which will incrementally load data revisions as they
       are published.
@@ -26,6 +26,10 @@ Parameters:
   S3CodeBucketName:
     Type: String
     Description: Bucket where Lambda zip files are hosted.
+
+Conditions:
+  IsIncrementalLoad: !Equals [!Ref ConsumptionType, INCREMENTAL]
+  IsFullLoad: !Equals [!Ref ConsumptionType, FULL]
 
 Resources:
   LambdaIamRole:
@@ -42,7 +46,7 @@ Resources:
               - sts:AssumeRole
       Path: /
       Policies:
-        - PolicyName: root
+        - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -52,6 +56,10 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+        - PolicyName: DataExchangeAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Effect: Allow
                 Action:
                   - dataexchange:GetDataSet
@@ -59,19 +67,39 @@ Resources:
                   - dataexchange:GetRevision
                   - dataexchange:ListDataSetRevisions
                   - dataexchange:ListRevisionAssets
-                  - dataexchange:CreateJob
-                  - dataexchange:GetJob
-                  - dataexchange:StartJob
-                  - dataexchange:CancelJob
-                  - dataexchange:ListJob
                   - dataexchange:TagResource
                   - dataexchange:ListTagsForResource
                   - dataexchange:GetAsset
                 Resource:
                   - !Sub
-                    - arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}*
+                    - arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}
                     - { DxDataSetId: !Ref DxDataSetId }
-                  - !Sub arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:jobs/*
+                  - !Sub
+                    - arn:aws:dataexchange:${AWS::Region}:${AWS::AccountId}:data-sets/${DxDataSetId}/*
+                    - { DxDataSetId: !Ref DxDataSetId }
+              - Effect: Allow
+                Action:
+                  - dataexchange:CreateJob
+                  - dataexchange:GetJob
+                  - dataexchange:StartJob
+                  - dataexchange:CancelJob
+                  - dataexchange:ListJob
+                Resource: "*"
+                Condition:
+                  StringEqualsIgnoreCase:
+                    "dataexchange:JobType": EXPORT_ASSETS_TO_S3
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - "*"
+                Condition:
+                  StringEqualsIgnoreCase:
+                    "s3:ExistingObjectTag/aws-data-exchange": "true"
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -86,32 +114,37 @@ Resources:
                   - !Sub
                     - arn:aws:s3:::${S3BucketName}/*
                     - { S3BucketName: !Ref S3BucketName }
+              - Effect: Allow
+                Action:
+                  - "s3:GetBucketLocation"
+                Resource:
+                  - "*"
 
   ExportDataSetLambda:
     Type: AWS::Lambda::Function
     Properties:
       Description: Exports specified dataset latest revision to S3 bucket.
-      Handler: index.handler
+      Handler: export_dataset.handler
       Role: !GetAtt LambdaIamRole.Arn
-      Runtime: Python3.7
+      Runtime: python3.7
       MemorySize: 128
       Timeout: 30
       Code:
         S3Bucket: !Ref S3CodeBucketName
-        S3Key: export_dataset.zip
+        S3Key: functions/export_dataset.zip
 
   MonitorExportJob:
     Type: AWS::Lambda::Function
     Properties:
       Description: Monitors the status of an Export Job.
-      Handler: index.handler
+      Handler: monitor_export.handler
       Role: !GetAtt LambdaIamRole.Arn
-      Runtime: Python3.7
+      Runtime: python3.7
       MemorySize: 128
       Timeout: 30
       Code:
         S3Bucket: !Ref S3CodeBucketName
-        S3Key: monitor_export.zip
+        S3Key: functions/monitor_export.zip
 
   StateMachineIamRole:
     Type: AWS::IAM::Role
@@ -134,28 +167,36 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                Resource: "*"
-
+                Resource:
+                  - !GetAtt ExportDataSetLambda.Arn
+                  - !GetAtt MonitorExportJob.Arn
+  # TODO: Add notification on failure
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      DefinitionString: !Sub
-        - |-
+      RoleArn: !GetAtt StateMachineIamRole.Arn
+      DefinitionString:
+        Fn::Sub: |-
           {
             "Comment": "State machine to export data from subscribed data-exchange entitled data-set",
             "StartAt": "Export DataSet",
+            "Version": "1.0",
             "States": {
               "Export DataSet": {
                 "Type": "Task",
-                "Resource": "${export_dataset_lambda_arn}",
+                "Resource": "${ExportDataSetLambda.Arn}",
                 "Next": "Wait 1 Minute",
                 "Parameters": {
-                  "Payload": {
-                    "dataset_id": "${dataset_id}",
-                    "bucket_name": "${bucket_name}",
-                    "prefix": "${prefix}"
-                  }
-                }
+                  "dataset_id": "${DxDataSetId}",
+                  "bucket_name": "${S3BucketName}",
+                  "prefix": "dx"
+                },
+                "Retry": [{
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 5
+                }]
               },
               "Wait 1 Minute": {
                 "Type": "Wait",
@@ -164,13 +205,14 @@ Resources:
               },
               "Get Export Status": {
                 "Type": "Task",
-                "Resource": "${monitor_export_lambda_arn}",
+                "Resource": "${MonitorExportJob.Arn}",
                 "Next": "Export Complete?",
-                "Parameters": {
-                  "Payload": {
-                    "job_id": "$.job_id"
-                  }
-                }
+                "Retry": [{
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 5,
+                  "BackoffRate": 2
+                }]
               },
               "Export Complete?": {
                 "Type": "Choice",
@@ -184,7 +226,7 @@ Resources:
                     "Variable": "$.ExportJob.State",
                     "StringEquals": "ERROR",
                     "Next": "Failed"
-                  },
+                  }
                 ],
                 "Default": "Wait 1 Minute"
               },
@@ -198,15 +240,12 @@ Resources:
               }
             }
           }
-        - export_dataset_lambda_arn: !GetAtt [ExportDataSetLambda, Arn]
-          monitor_export_lambda_arn: !GetAtt [MonitorExportJob, Arn]
-          dataset_id: !Ref DxDataSetId
-          bucket_name: !Ref S3BucketName
-          prefix: !Ref KeyPrefix
-      RoleArn: !GetAtt [StateMachineIamRole, Arn]
+
+  # TODO: for FULL load create a CFT CR to trigger/call state machine
 
   DxEventNotification:
     Type: AWS::Events::Rule
+    Condition: IsIncrementalLoad
     Properties:
       Description: Monitors entitled dataset for new revisions published
       EventPattern:
@@ -224,6 +263,7 @@ Resources:
 
   EventsIamRole:
     Type: AWS::IAM::Role
+    Condition: IsIncrementalLoad
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -248,4 +288,7 @@ Resources:
                   - { StateMachineArn: !GetAtt "StateMachine.Arn" }
 
 Outputs:
-  # TODO:
+  ExportedDataSetId:
+    Value: !Ref DxDataSetId
+  StateMachineArn:
+    Value: !Ref StateMachine

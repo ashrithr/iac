@@ -21,4 +21,4 @@ def get_job_state(job_id):
     job = dx.get_job(JobId=job_id)
     logger.info(job)
 
-    return job.get('state')  # COMPLETED or ERROR
+    return job.get('State')  # COMPLETED or ERROR
