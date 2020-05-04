@@ -14,12 +14,12 @@ def handler(event, context):
     return
 
 
-def send_response(event, context, response_status, reason):
+def send_response(event, context, response_status, reason, physicalResourceId=None):
     response_body = {
         'Status': response_status,
         'Reason': "{}. For more information, Check the details in CloudWatch Log Group: {}, CloudWatch Log Stream: {}"
         .format(reason, context.log_group_name, context.log_stream_name),
-        'PhysicalResourceId': event['ResourceProperties']['LambdaArn'],
+        'PhysicalResourceId': physicalResourceId or context.log_stream_name,
         'StackId': event['StackId'],
         'RequestId': event['RequestId'],
         'LogicalResourceId': event['LogicalResourceId']
