@@ -293,9 +293,6 @@ Resources:
                   - states:StartExecution
                 Resource: !Ref StateMachine
 
-  # Execute StateMachine using Custom Resource only for Full Load, Incremental
-  # loads will be automatically triggered based on event notification setup.
-
   LambdaCustomResourceIamRole:
     Type: AWS::IAM::Role
     Condition: IsFullLoad
