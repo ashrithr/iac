@@ -5,7 +5,7 @@
     },
     {
         "ParameterKey": "ConsumptionType",
-        "ParameterValue": "INCREMENTAL"
+        "ParameterValue": "FULL"
     },
     {
         "ParameterKey": "S3BucketName",
@@ -14,5 +14,9 @@
     {
         "ParameterKey": "S3CodeBucketName",
         "ParameterValue": "cw-us-east-1-167270772459-ashrith"
+    },
+    {
+        "ParameterKey": "SnsTopicName",
+        "ParameterValue": "dx-poc"
     }
 ]

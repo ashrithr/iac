@@ -15,17 +15,19 @@ Parameters:
       - INCREMENTAL
     Description: >-
       Type of the consumption pipeline to setup, FULL will perform one-time
-      load, where as  INCREMENTAL will perform one-time load and setup a
-      monitoring pipeline which will incrementally load data revisions as they
-      are published.
+      load and setup event notifications for getting future revisions of data,
+      where as INCREMENTAL will only setup a monitoring pipeline which will
+      incrementally load data revisions as they are published.
     Type: String
     Default: INCREMENTAL
   S3BucketName:
     Type: String
     Description: Bucket used to publish the data to.
-  S3CodeBucketName:
+  SnsTopicName:
     Type: String
-    Description: Bucket where Lambda zip files are hosted.
+    Description: >-
+      Name of the SNS Topic that used to send notifications in case of a state
+      machine failure.
 
 Conditions:
   IsIncrementalLoad: !Equals [!Ref ConsumptionType, INCREMENTAL]
@@ -129,9 +131,7 @@ Resources:
       Runtime: python3.7
       MemorySize: 128
       Timeout: 30
-      Code:
-        S3Bucket: !Ref S3CodeBucketName
-        S3Key: functions/export_dataset.zip
+      Code: export_dataset/
 
   MonitorExportJob:
     Type: AWS::Lambda::Function
@@ -142,9 +142,7 @@ Resources:
       Runtime: python3.7
       MemorySize: 128
       Timeout: 30
-      Code:
-        S3Bucket: !Ref S3CodeBucketName
-        S3Key: functions/monitor_export.zip
+      Code: monitor_export/
 
   StateMachineIamRole:
     Type: AWS::IAM::Role
@@ -170,6 +168,15 @@ Resources:
                 Resource:
                   - !GetAtt ExportDataSetLambda.Arn
                   - !GetAtt MonitorExportJob.Arn
+        - PolicyName: SnsPublishPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:publish
+                Resource:
+                  - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}"
 
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -235,7 +242,12 @@ Resources:
                   "End": true
               },
               "Failed": {
-                  "Type": "Pass",
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sns:publish",
+                  "Parameters": {
+                    "Message": "Load from latest revision failed for dataset-id: ${DxDataSetId}",
+                    "TopicArn": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}"
+                  },
                   "End": true
               }
             }
@@ -243,7 +255,6 @@ Resources:
 
   DxEventNotification:
     Type: AWS::Events::Rule
-    Condition: IsIncrementalLoad
     Properties:
       Description: Monitors entitled dataset for new revisions published
       EventPattern:
@@ -261,7 +272,6 @@ Resources:
 
   EventsIamRole:
     Type: AWS::IAM::Role
-    Condition: IsIncrementalLoad
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -282,6 +292,9 @@ Resources:
                 Action:
                   - states:StartExecution
                 Resource: !Ref StateMachine
+
+  # Execute StateMachine using Custom Resource only for Full Load, Incremental
+  # loads will be automatically triggered based on event notification setup.
 
   LambdaCustomResourceIamRole:
     Type: AWS::IAM::Role
@@ -323,9 +336,7 @@ Resources:
     Properties:
       Handler: execute_sf.handler
       Role: !GetAtt LambdaCustomResourceIamRole.Arn
-      Code:
-        S3Bucket: !Ref S3CodeBucketName
-        S3Key: functions/execute_sf.zip
+      Code: execute_sf/
       Runtime: python3.7
       Description: Executes a specified State Machine.
       MemorySize: 128
