@@ -18,5 +18,9 @@
     {
         "ParameterKey": "SnsTopicName",
         "ParameterValue": "dx-poc"
+    },
+    {
+        "ParameterKey": "RetryExecutionCount",
+        "ParameterValue": 2
     }
 ]

@@ -28,6 +28,11 @@ Parameters:
     Description: >-
       Name of the SNS Topic that used to send notifications in case of a state
       machine failure.
+  RetryExecutionCount:
+    Type: Number
+    Description: >-
+      Number of times the whole workflow has to be retried
+    Default: 3
 
 Conditions:
   IsIncrementalLoad: !Equals [!Ref ConsumptionType, INCREMENTAL]
@@ -121,6 +126,14 @@ Resources:
                   - "s3:GetBucketLocation"
                 Resource:
                   - "*"
+        - PolicyName: StepFunctionsExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: "*"
 
   ExportDataSetLambda:
     Type: AWS::Lambda::Function
@@ -143,6 +156,17 @@ Resources:
       MemorySize: 128
       Timeout: 30
       Code: monitor_export/
+
+  RetryStep:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Retries the state machine workflow based on specified number of times.
+      Handler: retry.handler
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: python3.7
+      MemorySize: 128
+      Timeout: 30
+      Code: retry_step/
 
   StateMachineIamRole:
     Type: AWS::IAM::Role
@@ -193,11 +217,6 @@ Resources:
                 "Type": "Task",
                 "Resource": "${ExportDataSetLambda.Arn}",
                 "Next": "Wait 1 Minute",
-                "Parameters": {
-                  "dataset_id": "${DxDataSetId}",
-                  "bucket_name": "${S3BucketName}",
-                  "prefix": "dx"
-                },
                 "Retry": [{
                   "ErrorEquals": ["States.TaskFailed"],
                   "IntervalSeconds": 5,
@@ -232,20 +251,41 @@ Resources:
                   {
                     "Variable": "$.ExportJob.State",
                     "StringEquals": "ERROR",
-                    "Next": "Failed"
+                    "Next": "Should Restart"
                   }
                 ],
                 "Default": "Wait 1 Minute"
               },
-              "Done": {
-                  "Type": "Pass",
-                  "End": true
+              "Should Restart": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.retry_execution_count",
+                    "NumericGreaterThan": 0,
+                    "Next": "Notify Retry"
+                  }
+                ],
+                "Default": "Done"
               },
-              "Failed": {
+              "Notify Retry": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::sns:publish",
+                "Parameters": {
+                  "Message": "Load from latest revision failed for dataset-id: ${DxDataSetId}. Retrying...",
+                  "TopicArn": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}"
+                },
+                "Next": "Restart"
+              },
+              "Restart": {
+                "Type": "Task",
+                "Resource": "${RetryStep.Arn}",
+                "Next": "Done"
+              },
+              "Done": {
                   "Type": "Task",
                   "Resource": "arn:aws:states:::sns:publish",
                   "Parameters": {
-                    "Message": "Load from latest revision failed for dataset-id: ${DxDataSetId}",
+                    "Message": "Load from latest revision succeeded for dataset-id: ${DxDataSetId}",
                     "TopicArn": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}"
                   },
                   "End": true
@@ -269,6 +309,15 @@ Resources:
         - Arn: !Ref StateMachine
           Id: "StateMachineV1"
           RoleArn: !GetAtt EventsIamRole.Arn
+          Input:
+            Fn::Sub: |-
+              {
+                "state_machine_arn": "${StateMachine}",
+                "retry_execution_count": "${RetryExecutionCount}",
+                "dataset_id": "${DxDataSetId}",
+                "bucket_name": "${S3BucketName}",
+                "prefix": "dx"
+              }
 
   EventsIamRole:
     Type: AWS::IAM::Role
@@ -345,6 +394,15 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ExecuteStateMachineLambda.Arn
       SF_ARN: !Ref StateMachine
+      SF_INPUT:
+        Fn::Sub: |-
+          {
+            "state_machine_arn": "${StateMachine}",
+            "retry_execution_count": "${RetryExecutionCount}",
+            "dataset_id": "${DxDataSetId}",
+            "bucket_name": "${S3BucketName}",
+            "prefix": "dx"
+          }
 
 Outputs:
   ExportedDataSetId:

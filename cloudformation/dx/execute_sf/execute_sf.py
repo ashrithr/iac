@@ -18,10 +18,12 @@ def handler(event, context):
     try:
         if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
             logger.info("Handling Create/Update request")
-            if 'SF_ARN' not in event['ResourceProperties']:
+            if 'SF_ARN' not in event['ResourceProperties'] or \
+                    'SF_INPUT' not in event['ResourceProperties']:
                 raise "Required parameters are not present"
             sf_arn = event['ResourceProperties']['SF_ARN']
-            response = execute_sf(sf_arn)
+            sf_input = event['ResourceProperties']['SF_INPUT']
+            response = execute_sf(sf_arn, sf_input)
             response_data = {'ExecutionArn': response}
         elif event['RequestType'] == 'Delete':
             logger.info(
@@ -38,14 +40,14 @@ def handler(event, context):
     return
 
 
-def execute_sf(sf_arn):
+def execute_sf(sf_arn, sf_input):
     logger.info("Triggering Step Function: %s", sf_arn)
 
     client = boto3.client('stepfunctions')
     try:
         response = client.start_execution(
             stateMachineArn=sf_arn,
-            input='{}'
+            input=sf_input
         )
         return response['executionArn']
     except Exception as e:

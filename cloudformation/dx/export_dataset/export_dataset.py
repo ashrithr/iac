@@ -19,7 +19,6 @@ def handler(event, context):
     job_id = export_assets(dataset_assets, bucket, prefix)
 
     return {
-        'message': 'Successfully executed exported job',
         'status': 'SUCCESS',
         'job_id': job_id
     }
