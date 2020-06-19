@@ -222,7 +222,8 @@ Resources:
                   "IntervalSeconds": 5,
                   "MaxAttempts": 2,
                   "BackoffRate": 5
-                }]
+                }],
+                "ResultPath": "$.ExportDatasetResult"
               },
               "Wait 1 Minute": {
                 "Type": "Wait",
@@ -238,18 +239,19 @@ Resources:
                   "IntervalSeconds": 5,
                   "MaxAttempts": 5,
                   "BackoffRate": 2
-                }]
+                }],
+                "ResultPath": "$.GetExportStatusResult"
               },
               "Export Complete?": {
                 "Type": "Choice",
                 "Choices": [
                   {
-                    "Variable": "$.ExportJob.State",
+                    "Variable": "$.GetExportStatusResult.ExportJob.State",
                     "StringEquals": "COMPLETED",
                     "Next": "Done"
                   },
                   {
-                    "Variable": "$.ExportJob.State",
+                    "Variable": "$.GetExportStatusResult.ExportJob.State",
                     "StringEquals": "ERROR",
                     "Next": "Should Restart"
                   }

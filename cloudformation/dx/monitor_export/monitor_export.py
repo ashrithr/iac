@@ -8,7 +8,7 @@ dx = boto3.client('dataexchange')
 
 
 def handler(event, context):
-    job_id = event['job_id']
+    job_id = event['ExportDatasetResult']['job_id']
 
     return {
         "ExportJob": {
