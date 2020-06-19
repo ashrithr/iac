@@ -192,6 +192,7 @@ Resources:
                 Resource:
                   - !GetAtt ExportDataSetLambda.Arn
                   - !GetAtt MonitorExportJob.Arn
+                  - !GetAtt RetryStep.Arn
         - PolicyName: SnsPublishPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -276,12 +277,14 @@ Resources:
                   "Message": "Load from latest revision failed for dataset-id: ${DxDataSetId}. Retrying...",
                   "TopicArn": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}"
                 },
-                "Next": "Restart"
+                "Next": "Restart",
+                "ResultPath": "$.NotifyRetryResult"
               },
               "Restart": {
                 "Type": "Task",
                 "Resource": "${RetryStep.Arn}",
-                "Next": "Done"
+                "Next": "Done",
+                "ResultPath": "$"
               },
               "Done": {
                   "Type": "Task",
@@ -315,7 +318,7 @@ Resources:
             Fn::Sub: |-
               {
                 "state_machine_arn": "${StateMachine}",
-                "retry_execution_count": "${RetryExecutionCount}",
+                "retry_execution_count": ${RetryExecutionCount},
                 "dataset_id": "${DxDataSetId}",
                 "bucket_name": "${S3BucketName}",
                 "prefix": "dx"
@@ -400,7 +403,7 @@ Resources:
         Fn::Sub: |-
           {
             "state_machine_arn": "${StateMachine}",
-            "retry_execution_count": "${RetryExecutionCount}",
+            "retry_execution_count": ${RetryExecutionCount},
             "dataset_id": "${DxDataSetId}",
             "bucket_name": "${S3BucketName}",
             "prefix": "dx"
