@@ -39,6 +39,64 @@ Conditions:
   IsFullLoad: !Equals [!Ref ConsumptionType, FULL]
 
 Resources:
+  S3KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Master Key for this LZ - ${AWS::StackName}"
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Id: !Sub "master-lz-key-${AWS::StackName}"
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Allow administration of the key by the Account root user
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - "kms:*"
+            Resource: "*"
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/GSuiteAdministrators"
+            Action:
+              - "kms:*"
+            Resource: "*"
+          - Sid: Allow SNS use of the key
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey*"
+            Resource: "*"
+
+  S3KmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/cw-aws/${AWS::Region}/${AWS::StackName}/kmskey"
+      TargetKeyId: !GetAtt S3KmsKey.Arn
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "aws-s3-${AWS::Region}-${AWS::StackName}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "aws:kms"
+              KMSMasterKeyID: !GetAtt S3KmsKey.Arn
+
+  # S3BucketPolicy:
+  #   Type: AWS::S3::BucketPolicy
+  #   DependsOn: S3Bucket
+  #   Properties:
+  #     Bucket: !Ref S3Bucket
+  #     PolicyDocument:
+  #       Statement:
+  #         -
+
   LambdaIamRole:
     Type: AWS::IAM::Role
     Properties:
