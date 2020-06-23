@@ -7,7 +7,6 @@ Parameters:
   AdminRoleId:
     Description: Role ID of the admin to restrict bucket access to.
     Type: String
-    Default: AROASN4Q5N3VS2O7NPKCR
 
 Resources:
   S3KmsKey:
