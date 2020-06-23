@@ -20,6 +20,13 @@ Parameters:
       incrementally load data revisions as they are published.
     Type: String
     Default: INCREMENTAL
+  RevisionsCount:
+    Description: >-
+      Number of previous revisions to load as part of the FULL consumption type.
+    MaxValue: 25
+    MinValue: 1
+    Default: 1
+    Type: Number
   S3BucketName:
     Type: String
     Description: Bucket used to publish the data to.
@@ -31,87 +38,16 @@ Parameters:
   RetryExecutionCount:
     Type: Number
     Description: >-
-      Number of times the whole workflow has to be retried
-    Default: 3
+      Number of times the whole workflow has to be retried for each revision.
+    Default: 2
+    MaxValue: 5
+    MinValue: 1
 
 Conditions:
   IsIncrementalLoad: !Equals [!Ref ConsumptionType, INCREMENTAL]
   IsFullLoad: !Equals [!Ref ConsumptionType, FULL]
 
 Resources:
-  S3KmsKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub "Master Key for this LZ - ${AWS::StackName}"
-      Enabled: true
-      EnableKeyRotation: true
-      KeyPolicy:
-        Id: !Sub "master-lz-key-${AWS::StackName}"
-        Version: "2012-10-17"
-        Statement:
-          - Sid: Allow administration of the key by the Account root user
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action:
-              - "kms:*"
-            Resource: "*"
-          - Sid: Allow administration of the key
-            Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/GSuiteAdministrators"
-            Action:
-              - "kms:*"
-            Resource: "*"
-          - Sid: Allow SNS use of the key
-            Effect: Allow
-            Principal:
-              Service: sns.amazonaws.com
-            Action:
-              - "kms:Decrypt"
-              - "kms:GenerateDataKey*"
-            Resource: "*"
-
-  S3KmsKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub "alias/cw-aws/${AWS::Region}/${AWS::StackName}/kmskey"
-      TargetKeyId: !GetAtt S3KmsKey.Arn
-
-  S3Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "aws-s3-${AWS::Region}-${AWS::StackName}"
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: "aws:kms"
-              KMSMasterKeyID: !GetAtt S3KmsKey.Arn
-
-  S3BucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    DependsOn: S3Bucket
-    Properties:
-      Bucket: !Ref S3Bucket
-      PolicyDocument:
-        Statement:
-          - NotAction:
-            - "s3:PutObject"
-            - "s3:DeleteObject
-            - "s3:GetObject"
-            - "s3:GetBucketLocation"
-            - "s3:AbortMultipartUpload"
-            - "s3::List*"
-            Effect: Deny
-            Principal: "*"
-            Resource:
-              - !Sub "arn:aws:s3:::${S3Bucket}"
-              - !Sub "arn:aws:s3:::${S3Bucket}/*"
-            Condition:
-              StringNotLike:
-                aws:userId:
-                  - !Sub "${LambdaIamRole.RoleId}:*"
-
   LambdaIamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -420,46 +356,12 @@ Resources:
                   - states:StartExecution
                 Resource: !Ref StateMachine
 
-  LambdaCustomResourceIamRole:
-    Type: AWS::IAM::Role
-    Condition: IsFullLoad
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Path: "/"
-      Policies:
-        - PolicyName: CloudWatchLogsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
-        - PolicyName: StepFunctionsExecutionPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:StartExecution
-                Resource: !Ref StateMachine
-
   ExecuteStateMachineLambda:
     Type: AWS::Lambda::Function
     Condition: IsFullLoad
     Properties:
       Handler: execute_sf.handler
-      Role: !GetAtt LambdaCustomResourceIamRole.Arn
+      Role: !GetAtt LambdaIamRole.Arn
       Code: execute_sf/
       Runtime: python3.7
       Description: Executes a specified State Machine.
@@ -472,6 +374,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ExecuteStateMachineLambda.Arn
       SF_ARN: !Ref StateMachine
+      REVISIONS_COUNT: !Ref RevisionsCount
       SF_INPUT:
         Fn::Sub: |-
           {

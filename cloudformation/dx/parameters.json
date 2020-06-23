@@ -1,7 +1,7 @@
 [
     {
         "ParameterKey": "DxDataSetId",
-        "ParameterValue": "aae4c2cd145a48454f9369d4a4db5c66"
+        "ParameterValue": "7a72f36941e5206793688ee3765dc3f9"
     },
     {
         "ParameterKey": "ConsumptionType",
@@ -22,5 +22,9 @@
     {
         "ParameterKey": "RetryExecutionCount",
         "ParameterValue": 2
+    },
+    {
+        "ParameterKey": "RevisionsCount",
+        "ParameterValue": 15
     }
 ]

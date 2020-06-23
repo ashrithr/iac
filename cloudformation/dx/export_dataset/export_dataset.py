@@ -14,8 +14,12 @@ def handler(event, context):
     bucket = event['bucket_name']
     prefix = event['prefix']
 
-    dataset_revision = get_lastest_revision(dataset_id)
-    dataset_assets = get_all_assets(dataset_id, dataset_revision.get('Id'))
+    if 'revision_id' in event:
+        dataset_revision = event['revision_id']
+    else:
+        dataset_revision = get_lastest_revision(dataset_id).get('Id')
+
+    dataset_assets = get_all_assets(dataset_id, dataset_revision)
     job_id = export_assets(dataset_assets, bucket, prefix)
 
     return {
@@ -47,10 +51,10 @@ def get_lastest_revision(dataset_id):
     return result.get('Revisions')[0]
 
 
-def get_all_revisions(data_set_id):
+def get_all_revisions(data_set_id, limit=1):
 
     revisions = []
-    res = dx.list_data_set_revisions(DataSetId=data_set_id)
+    res = dx.list_data_set_revisions(DataSetId=data_set_id, MaxResults=1)
     next_token = res.get('NextToken')
 
     revisions += res.get('Revisions')
@@ -60,7 +64,7 @@ def get_all_revisions(data_set_id):
         revisions += res.get('Revisions')
         next_token = res.get('NextToken')
 
-    return revisions
+    return [r['Id'] for r in revisions]
 
 
 def get_all_assets(data_set_id, revision_id):
@@ -87,12 +91,13 @@ def export_assets(assets, bucket, prefix):
         asset_destinations.append({
             "AssetId": asset.get('Id'),
             "Bucket": bucket,
-            "Key": prefix + '/' + asset.get('Name')
+            "Key": prefix + '/' + asset.get("DataSetId") + '/' + asset.get("RevisionId") + '/' + asset.get('Name')
         })
 
     job = dx.create_job(Type='EXPORT_ASSETS_TO_S3', Details={
         "ExportAssetsToS3": {
-            "RevisionId": asset.get("RevisionId"), "DataSetId": asset.get("DataSetId"),
+            "RevisionId": asset.get("RevisionId"),
+            "DataSetId": asset.get("DataSetId"),
             "AssetDestinations": asset_destinations
         }
     })
