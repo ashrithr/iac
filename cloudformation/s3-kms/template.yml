@@ -5,7 +5,9 @@ Description: >-
 
 Parameters:
   AdminRoleId:
-    Description: Role ID of the admin to restrict bucket access to.
+    Description: >-
+      Role ID of the admin to restrict bucket access to. To get a role id use
+      `aws iam get-role --role-name [role-name]`.
     Type: String
 
 Resources:
@@ -94,7 +96,6 @@ Resources:
 
   BucketIamRole:
     Type: AWS::IAM::Role
-    Description: Creates an IAM role to access bucket from Lambda.
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -134,7 +135,7 @@ Resources:
                 Action:
                   - "kms:*"
                 Resource:
-                  - !GetAtt BucketIamRole.Arn
+                  - !GetAtt S3KmsKey.Arn
 
 Outputs:
   BucketIamRoleId:
